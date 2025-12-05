@@ -1,0 +1,235 @@
+{
+  "dashboard": {
+    "title": "SOC - Alertas Cr\u00edticos e Alta Severidade",
+    "tags": [
+      "soc",
+      "security",
+      "critical"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Alertas Cr\u00edticos (\u00daltimas 24h)",
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "event.severity:\"Critical\" OR event.severity:\"High\"",
+            "metrics": [
+              {
+                "type": "count",
+                "id": "1"
+              }
+            ],
+            "timeField": "@timestamp"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 10,
+                  "color": "yellow"
+                },
+                {
+                  "value": 50,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "type": "piechart",
+        "title": "Distribui\u00e7\u00e3o por Fonte",
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "event.severity:\"Critical\" OR event.severity:\"High\"",
+            "metrics": [
+              {
+                "type": "count",
+                "id": "1"
+              }
+            ],
+            "bucketAggs": [
+              {
+                "type": "terms",
+                "field": "event.module.keyword",
+                "id": "2"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "type": "table",
+        "title": "Top 10 Hosts com Mais Alertas",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 6
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "event.severity:\"Critical\" OR event.severity:\"High\"",
+            "metrics": [
+              {
+                "type": "count",
+                "id": "1"
+              }
+            ],
+            "bucketAggs": [
+              {
+                "type": "terms",
+                "field": "host.name.keyword",
+                "settings": {
+                  "size": "10",
+                  "order": "desc"
+                },
+                "id": "2"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "timeseries",
+        "title": "Timeline de Alertas Cr\u00edticos",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "event.severity:\"Critical\" OR event.severity:\"High\"",
+            "metrics": [
+              {
+                "type": "count",
+                "id": "1"
+              }
+            ],
+            "bucketAggs": [
+              {
+                "type": "date_histogram",
+                "field": "@timestamp",
+                "id": "2",
+                "settings": {
+                  "interval": "auto"
+                }
+              }
+            ]
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "type": "table",
+        "title": "Vulnerabilidades Cr\u00edticas - Tenable",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 14
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "vulnerability.severity:\"Critical\" AND event.module:\"tenable\"",
+            "metrics": [
+              {
+                "type": "raw_data",
+                "id": "1"
+              }
+            ],
+            "bucketAggs": [
+              {
+                "type": "terms",
+                "field": "vulnerability.id.keyword",
+                "id": "2"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "type": "table",
+        "title": "Alertas Microsoft Defender",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 14
+        },
+        "targets": [
+          {
+            "datasource": "Elasticsearch-SOC",
+            "query": "event.module:\"microsoft_defender\" AND (event.severity:\"High\" OR event.severity:\"Critical\")",
+            "metrics": [
+              {
+                "type": "raw_data",
+                "id": "1"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "10s",
+        "30s",
+        "1m",
+        "5m"
+      ]
+    }
+  },
+  "overwrite": true
+}

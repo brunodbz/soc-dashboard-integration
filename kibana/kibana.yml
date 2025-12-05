@@ -1,0 +1,13 @@
+server.name: soc-kibana
+server.host: "0.0.0.0"
+elasticsearch.hosts: [ "http://elasticsearch:9200" ]
+
+# Monitoring
+monitoring.ui.container.elasticsearch.enabled: true
+
+# Security
+xpack.security.enabled: true
+xpack.encryptedSavedObjects.encryptionKey: "chave-de-32-caracteres-aqui-12"
+
+# Configurações de Alertas
+xpack.actions.enabled: true

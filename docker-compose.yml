@@ -1,0 +1,264 @@
+version: '3.8'
+
+services:
+  # Elasticsearch - SIEM Core
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: soc-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-ChangeMe123!}
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    volumes:
+      - elastic-data:/usr/share/elasticsearch/data
+      - ./config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    ports:
+      - "9200:9200"
+    networks:
+      - soc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Kibana - Visualização e SIEM
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.3
+    container_name: soc-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-ChangeMe123!}
+      - XPACK_SECURITY_ENABLED=true
+      - SERVER_NAME=soc-kibana
+    volumes:
+      - kibana-data:/usr/share/kibana/data
+      - ./kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - soc-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis - Cache para OpenCTI
+  redis:
+    image: redis:7.2-alpine
+    container_name: soc-redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - soc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # MinIO - Storage para OpenCTI
+  minio:
+    image: minio/minio:latest
+    container_name: soc-minio
+    environment:
+      - MINIO_ROOT_USER=${MINIO_USER:-opencti}
+      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD:-ChangeMe123!}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - soc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # RabbitMQ - Message Broker para OpenCTI
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: soc-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-opencti}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-ChangeMe123!}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - soc-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # OpenCTI - Threat Intelligence Platform
+  opencti:
+    image: opencti/platform:6.0.9
+    container_name: soc-opencti
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - OPENCTI_ADMIN_EMAIL=${OPENCTI_ADMIN_EMAIL:-admin@soc.local}
+      - OPENCTI_ADMIN_PASSWORD=${OPENCTI_ADMIN_PASSWORD:-ChangeMe123!}
+      - OPENCTI_ADMIN_TOKEN=${OPENCTI_ADMIN_TOKEN:-ChangeTokenHere123}
+      - OPENCTI_BASE_URL=${OPENCTI_BASE_URL:-http://localhost:8080}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=${MINIO_USER:-opencti}
+      - MINIO_SECRET_KEY=${MINIO_PASSWORD:-ChangeMe123!}
+      - RABBITMQ_HOSTNAME=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER:-opencti}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-ChangeMe123!}
+      - REDIS_HOSTNAME=redis
+      - REDIS_PORT=6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-ChangeMe123!}
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - soc-network
+    restart: unless-stopped
+
+  # OpenCTI Worker
+  opencti-worker:
+    image: opencti/worker:6.0.9
+    container_name: soc-opencti-worker-1
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN:-ChangeTokenHere123}
+      - WORKER_LOG_LEVEL=info
+    depends_on:
+      - opencti
+    networks:
+      - soc-network
+    restart: unless-stopped
+
+  # OpenCTI Connector - Tenable
+  connector-tenable:
+    image: opencti/connector-tenable-vuln-management:6.0.9
+    container_name: soc-connector-tenable
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN:-ChangeTokenHere123}
+      - CONNECTOR_ID=${TENABLE_CONNECTOR_ID:-tenable-$(date +%s)}
+      - CONNECTOR_NAME=Tenable
+      - CONNECTOR_SCOPE=tenable
+      - CONNECTOR_LOG_LEVEL=info
+      - TENABLE_URL=https://cloud.tenable.com
+      - TENABLE_ACCESS_KEY=${TENABLE_ACCESS_KEY}
+      - TENABLE_SECRET_KEY=${TENABLE_SECRET_KEY}
+      - TENABLE_IMPORT_VULNERABILITIES=true
+      - TENABLE_IMPORT_ASSETS=true
+      - TENABLE_INTERVAL=24
+    depends_on:
+      - opencti
+    networks:
+      - soc-network
+    restart: unless-stopped
+
+  # OpenCTI Connector - CVE
+  connector-cve:
+    image: opencti/connector-cve:6.0.9
+    container_name: soc-connector-cve
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=${OPENCTI_ADMIN_TOKEN:-ChangeTokenHere123}
+      - CONNECTOR_ID=cve-connector
+      - CONNECTOR_NAME=CVE
+      - CONNECTOR_SCOPE=vulnerability
+      - CONNECTOR_LOG_LEVEL=info
+      - CVE_BASE_URL=https://services.nvd.nist.gov/rest/json/cves
+      - CVE_INTERVAL=7
+    depends_on:
+      - opencti
+    networks:
+      - soc-network
+    restart: unless-stopped
+
+  # Grafana - Dashboard de Visualização
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: soc-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-ChangeMe123!}
+      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource,grafana-piechart-panel
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - soc-network
+    user: "472"
+    restart: unless-stopped
+
+  # Logstash - Pipeline de dados (opcional para integrações customizadas)
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.3
+    container_name: soc-logstash
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-ChangeMe123!}
+    volumes:
+      - ./config/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - logstash-data:/usr/share/logstash/data
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - soc-network
+    restart: unless-stopped
+
+networks:
+  soc-network:
+    driver: bridge
+
+volumes:
+  elastic-data:
+  kibana-data:
+  redis-data:
+  minio-data:
+  rabbitmq-data:
+  grafana-data:
+  logstash-data:
